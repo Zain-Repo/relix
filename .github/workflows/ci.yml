@@ -1,0 +1,120 @@
+name: Validate, build and release
+
+on:
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR updates cancel obsolete checks; publication is allowed to finish.
+  group: relix-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+
+jobs:
+  version:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate manifest, lockfile, notes and existing tags
+        id: version
+        run: python3 scripts/release.py version
+      - name: Test release safety and recovery
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+  checks:
+    name: Checks
+    needs: version
+    uses: ./.github/workflows/tests.yml
+
+  build:
+    name: Package (${{ matrix.target }})
+    needs: [version, checks]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Build optimized native executable
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package and execute the packaged version smoke check
+        shell: bash
+        run: python scripts/release.py package --target "${{ matrix.target }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relix-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  required:
+    name: Required checks
+    if: always()
+    needs: [version, checks, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all validation and packaging jobs to succeed
+        env:
+          VERSION_RESULT: ${{ needs.version.result }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          test "$VERSION_RESULT" = success
+          test "$CHECKS_RESULT" = success
+          test "$BUILD_RESULT" = success
+
+  release:
+    name: Publish release
+    needs: [version, required]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: relix-*
+          path: dist
+          merge-multiple: true
+      - name: Verify checksums and publish all platforms together
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py publish

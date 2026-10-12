@@ -1,0 +1,32 @@
+name: Set up native Rust build
+description: Install the pinned toolchain and GPUI Kit native prerequisites.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: '3.13'
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+      with:
+        toolchain: '1.96.0'
+        components: rustfmt, clippy
+    - name: Linux native prerequisites
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y \
+          build-essential clang cmake pkg-config libfontconfig-dev libwayland-dev \
+          libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev \
+          libssl-dev libzstd-dev libasound2-dev libvulkan1 libdbus-1-dev
+    - name: Verify native build tools
+      shell: bash
+      run: |
+        cmake --version
+        rustc --version
+        cargo --version
+    - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      with:
+        shared-key: native-${{ runner.os }}-${{ runner.arch }}
+        cache-on-failure: false
+        save-if: ${{ github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') }}
