@@ -220,10 +220,10 @@ fn installation_layout(current: &Path) -> Result<(PathBuf, PathBuf)> {
             bundle.file_name() == Some(std::ffi::OsStr::new("Relix.app")),
             "Unexpected application bundle"
         );
-        return Ok((
+        Ok((
             bundle.to_path_buf(),
             current.strip_prefix(bundle)?.to_path_buf(),
-        ));
+        ))
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -636,7 +636,15 @@ mod tests {
         let destination = directory.path().join("installed");
         fs::create_dir(&destination).unwrap();
         fs::create_dir(directory.path().join("payload")).unwrap();
-        let executable = PathBuf::from(if cfg!(windows) { "relix.exe" } else { "relix" });
+        let executable = PathBuf::from(if cfg!(target_os = "macos") {
+            "Contents/MacOS/relix"
+        } else if cfg!(windows) {
+            "relix.exe"
+        } else {
+            "relix"
+        });
+        prepare_parent(&destination, &executable).unwrap();
+        prepare_parent(&directory.path().join("payload"), &executable).unwrap();
         fs::write(destination.join(&executable), b"old executable").unwrap();
         fs::write(destination.join("user.db"), b"user data").unwrap();
         fs::write(
