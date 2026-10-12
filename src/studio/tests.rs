@@ -3,6 +3,78 @@ use crate::database::Engine;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AnyWindowHandle, Bounds, TestAppContext, WindowBounds, WindowOptions, px, size};
 
+#[test]
+fn old_workspace_preferences_enable_automatic_updates_by_default() {
+    let preferences: crate::workspace::Preferences = serde_json::from_str(
+        r#"{"dark_mode":true,"row_limit":500,"show_sidebar":false,"show_results":true}"#,
+    )
+    .expect("Existing preferences remain readable");
+    assert!(preferences.automatic_updates);
+    assert!(preferences.dark_mode);
+    assert_eq!(preferences.row_limit, 500);
+    let explicit: crate::workspace::Preferences =
+        serde_json::from_str(r#"{"automatic_updates":false}"#)
+            .expect("An explicit opt-out remains readable");
+    assert!(!explicit.automatic_updates);
+}
+
+#[gpui_kit::test]
+fn updates_control_and_dialog_fit_minimum_workspace(cx: &mut TestAppContext) {
+    let (handle, _) = open_studio(cx, 900., 620.);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let button = window.find("updates").bounds();
+        assert!(button.size.width > px(0.));
+        assert!(button.right() <= px(900.));
+        window.click("updates", cx);
+        window.render_frame(cx);
+        for id in ["automatic-updates", "check-updates", "close-updates"] {
+            let control = window.find(id).bounds();
+            assert!(control.size.width > px(0.) && control.size.height > px(0.));
+            assert!(control.right() <= px(900.) && control.bottom() <= px(620.));
+        }
+    })
+    .expect("Update controls must render at the minimum window size");
+}
+
+#[gpui_kit::test]
+fn update_restart_protects_drafts_and_live_transactions(cx: &mut TestAppContext) {
+    let (_, studio) = open_studio(cx, 1280., 820.);
+    cx.update(|cx| {
+        studio.update(cx, |view, cx| {
+            assert_eq!(
+                view.update_restart_blocker(),
+                Some(
+                    "Save all nonempty drafts to the workspace, or close them, before restarting."
+                )
+            );
+            view.save_query(cx);
+            assert!(view.update_restart_blocker().is_none());
+            view.scratch(cx);
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        studio.update(cx, |view, _| {
+            let connection = view.connection().expect("Scratch connection opened");
+            connection
+                .session
+                .execute("BEGIN", 1, &CancelToken::new())
+                .expect("Transaction opened");
+            assert_eq!(
+                view.update_restart_blocker(),
+                Some(
+                    "Finish or roll back transactions, then disconnect databases before restarting."
+                )
+            );
+            connection
+                .session
+                .execute("ROLLBACK", 1, &CancelToken::new())
+                .expect("Transaction rolled back");
+        })
+    });
+}
+
 #[gpui_kit::test]
 fn result_tools_remain_reachable_in_compact_and_wide_workspaces(cx: &mut TestAppContext) {
     for width in [900., 1440.] {

@@ -10,6 +10,7 @@ mod record;
 mod results;
 #[cfg(test)]
 mod tests;
+mod updates;
 mod view;
 
 use crate::database::{
@@ -168,6 +169,10 @@ pub struct Studio {
     store: WorkspaceStore,
     credentials: std::sync::Arc<dyn crate::credentials::PasswordStore>,
     workspace: WorkspaceData,
+    update_state: updates::UpdateState,
+    installing_update: bool,
+    _update_task: Option<Task<()>>,
+    _update_timer: Option<Task<()>>,
     _connection_task: Option<Task<()>>,
     _catalog_task: Option<Task<()>>,
     _file_task: Option<Task<()>>,
@@ -243,6 +248,10 @@ impl Studio {
             store,
             credentials: crate::credentials::native_store(),
             workspace,
+            update_state: updates::UpdateState::Idle,
+            installing_update: false,
+            _update_task: None,
+            _update_timer: None,
             _connection_task: None,
             _catalog_task: None,
             _file_task: None,
@@ -299,6 +308,7 @@ impl Studio {
             window,
             cx,
         );
+        studio.start_update_timer(cx);
         studio
     }
 

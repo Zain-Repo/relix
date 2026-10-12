@@ -199,6 +199,15 @@ impl Studio {
                     )
                     .content(div().flex_1())
                     .child(
+                        Button::new("updates")
+                            .ghost()
+                            .label(self.update_state.toolbar_label())
+                            .accessibility_label("Application updates")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_updates(window, cx)),
+                            ),
+                    )
+                    .child(
                         Button::new("command-palette")
                             .icon(IconName::Search)
                             .when(wide, |button| button.label("Search commands…").w(px(220.)))
@@ -1549,6 +1558,16 @@ impl Studio {
 
 impl gpui_kit::Render for Studio {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.installing_update {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .child("Preparing to restart and install the update…")
+                .into_any_element();
+        }
         // Reserve room for the widest explorer so controls remain reachable
         // even after dragging the pane divider at this window size.
         let wide = window.viewport_size().width >= px(1280.);
@@ -1686,5 +1705,6 @@ impl gpui_kit::Render for Studio {
                     .right("SQL · UTF-8")
                     .right("Unsaved drafts are session-only"),
             )
+            .into_any_element()
     }
 }

@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import tomllib
+from urllib.parse import urlsplit
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,6 +95,7 @@ def package(target: str) -> None:
         staging = Path(temporary) / "Relix"
         staging.mkdir()
         for source, name in [(ROOT / "docs/releases.md", "RELEASE-PROCESS.md"),
+                             (ROOT / "docs/updates.md", "UPDATES.md"),
                              (ROOT / "releases" / f"v{value}.md", "RELEASE-NOTES.md"),
                              (ROOT / "README.md", "README.md")]:
             shutil.copy2(source, staging / name)
@@ -191,6 +193,8 @@ def publish() -> None:
                                "--json", "databaseId"))["databaseId"]
     uploaded = json.loads(run("gh", "api", f"repos/{repository}/releases/{release_id}"))
     remote_assets = {item["name"]: item for item in uploaded["assets"]}
+    if len(remote_assets) != len(uploaded["assets"]):
+        raise ValueError("Duplicate uploaded asset names; draft retained")
     for asset in assets:
         path = Path(asset)
         with path.open("rb") as stream:
@@ -198,6 +202,12 @@ def publish() -> None:
         remote = remote_assets.get(path.name)
         if not remote or remote["size"] != path.stat().st_size or remote.get("digest") != digest:
             raise ValueError(f"Uploaded asset verification failed for {path.name}; draft retained")
+        # Clients consume GitHub's asset digest and fixed HTTPS release origin.
+        url = urlsplit(remote.get("browser_download_url", ""))
+        expected_path = f"/{repository}/releases/download/{tag}/{path.name}"
+        if (url.scheme != "https" or url.netloc != "github.com"
+                or url.path != expected_path or url.query or url.fragment):
+            raise ValueError(f"Uploaded asset URL verification failed for {path.name}; draft retained")
     run("gh", "release", "edit", tag, "--repo", repository, "--draft=false", "--latest")
     print(f"Published Relix {value} at {source}")
 

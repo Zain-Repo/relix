@@ -82,6 +82,7 @@ pub struct HistoryRecord {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    pub automatic_updates: bool,
     pub dark_mode: bool,
     pub row_limit: usize,
     pub show_sidebar: bool,
@@ -91,6 +92,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            automatic_updates: true,
             dark_mode: false,
             row_limit: 1000,
             show_sidebar: true,

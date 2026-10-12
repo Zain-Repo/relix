@@ -59,6 +59,7 @@ class ReleaseTests(unittest.TestCase):
             for path in (self.root / "dist").iterdir():
                 if path.suffix != ".sha256":
                     assets.append({"name": path.name, "size": path.stat().st_size,
+                                   "browser_download_url": f"https://github.com/example/relix/releases/download/v0.1.0/{path.name}",
                                    "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
             return json.dumps({"assets": assets})
         if args[:2] == ("gh", "release"):
@@ -146,6 +147,54 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 release.publish()
             self.assertFalse(any(call.args[:2] == ("gh", "release") for call in calls.call_args_list))
+
+    def test_unsafe_asset_url_leaves_draft_unpublished(self):
+        for url in ["http://github.com/example/relix/releases/download/v0.1.0/archive.zip",
+                    "https://example.com/archive.zip", "https://github.com/other/relix/archive.zip"]:
+            def command(*args):
+                result = self.command(*args)
+                if args[:3] == ("gh", "api", "repos/example/relix/releases/42"):
+                    payload = json.loads(result)
+                    payload["assets"][0]["browser_download_url"] = url
+                    return json.dumps(payload)
+                return result
+
+            with self.subTest(url=url), patch.object(release, "run", side_effect=command) as calls:
+                with self.assertRaisesRegex(ValueError, "URL verification failed"):
+                    release.publish()
+                self.assertFalse(any(call.args[:3] == ("gh", "release", "edit")
+                                     for call in calls.call_args_list))
+
+    def test_missing_or_wrong_github_digest_leaves_draft_unpublished(self):
+        for digest in [None, "sha256:" + "0" * 64]:
+            def command(*args):
+                result = self.command(*args)
+                if args[:3] == ("gh", "api", "repos/example/relix/releases/42"):
+                    payload = json.loads(result)
+                    payload["assets"][0]["digest"] = digest
+                    return json.dumps(payload)
+                return result
+
+            with self.subTest(digest=digest), patch.object(release, "run", side_effect=command) as calls:
+                with self.assertRaisesRegex(ValueError, "asset verification failed"):
+                    release.publish()
+                self.assertFalse(any(call.args[:3] == ("gh", "release", "edit")
+                                     for call in calls.call_args_list))
+
+    def test_duplicate_remote_asset_names_leave_draft_unpublished(self):
+        def command(*args):
+            result = self.command(*args)
+            if args[:3] == ("gh", "api", "repos/example/relix/releases/42"):
+                payload = json.loads(result)
+                payload["assets"].append(payload["assets"][0])
+                return json.dumps(payload)
+            return result
+
+        with patch.object(release, "run", side_effect=command) as calls:
+            with self.assertRaisesRegex(ValueError, "Duplicate"):
+                release.publish()
+            self.assertFalse(any(call.args[:3] == ("gh", "release", "edit")
+                                 for call in calls.call_args_list))
 
     def test_published_release_is_immutable_on_retry(self):
         def command(*args):

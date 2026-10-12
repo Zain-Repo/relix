@@ -41,8 +41,8 @@ Actions updates for review.
 | macOS Intel | macos-x64.tar.gz | Relix.app bundle |
 
 Assets are named Relix-X.Y.Z followed by the platform suffix. All archives include
-README, release notes and this process document. SQLite, DuckDB and GPUI assets
-are compiled into the app. Windows CRT DLLs come only from Visual Studio's
+README, release notes, upgrade instructions and this process document. SQLite,
+DuckDB and GPUI assets are compiled into the app. Windows CRT DLLs come only from Visual Studio's
 licensed x64 redistributable directory. macOS builds reject unbundled non-system
 dynamic libraries and use ad-hoc bundle signing.
 
@@ -62,15 +62,19 @@ test account. Before broad distribution, manually test the GUI and real server
 connections on each supported platform.
 
 Packages are unsigned by a trusted publisher and macOS bundles are not notarized.
-There is no automatic updater. Release notes record these limitations.
+Relix 0.1.2 and newer include a portable-package updater. Read
+[updates.md](updates.md) for installation safety, the manual upgrade required
+from 0.1.0/0.1.1, and the HTTPS/GitHub digest trust boundary. Release notes record
+platform and signing limitations.
 
 ## Publication and recovery
 
 The publisher requires every archive, verifies its SHA-256 against the build
 job's sidecar checksum, and writes SHA256SUMS.txt. It creates a draft at the exact
 tested commit, uploads all packages, checks their GitHub-reported sizes and
-SHA-256 digests, then publishes. An incomplete upload leaves a draft, which can
-be completed by rerunning the same commit. Published tags are never moved.
+SHA-256 digests and official HTTPS download URLs, then publishes. An incomplete
+upload leaves a draft, which can be completed by rerunning the same commit.
+Published tags are never moved.
 Draft verification resolves the release ID through the GitHub CLI and reads
 the release-by-ID API; the release-by-tag API excludes unpublished drafts.
 Fix source defects with a new version and PR. Checksums verify file integrity;

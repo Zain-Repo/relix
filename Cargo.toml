@@ -1,6 +1,6 @@
 [package]
 name = "relix"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]
@@ -22,6 +22,13 @@ mysql = { version = "=28.0.3", default-features = false, features = ["minimal-ru
 sqlparser = { version = "=0.63.0", default-features = false, features = ["std"] }
 sqlformat = "=0.5.0"
 anyhow = "1"
+reqwest = { version = "=0.13.5", default-features = false, features = ["blocking", "native-tls-no-alpn"] }
+sha2 = "=0.10.9"
+semver = "=1.0.28"
+tempfile = "=3.27.0"
+zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }
+tar = "=0.4.46"
+flate2 = "=1.1.10"
 lsp-types = { version = "=0.97.0", features = ["proposed"] }
 
 

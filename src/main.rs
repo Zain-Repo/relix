@@ -6,6 +6,7 @@ mod sql_tools;
 mod studio;
 mod studio_theme;
 mod table_browse;
+mod updater;
 mod workspace;
 
 #[cfg(test)]
@@ -15,6 +16,14 @@ use gpui_kit::{AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 use studio::Studio;
 
 fn main() {
+    match updater::install::run_helper_if_requested() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            eprintln!("Relix update failed: {error:#}");
+            std::process::exit(1);
+        }
+    }
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!("Relix {}", env!("CARGO_PKG_VERSION"));
         return;

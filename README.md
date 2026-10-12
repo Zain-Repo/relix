@@ -52,3 +52,6 @@ tunnels, ER diagrams, schema comparison and additional engines are later work.
 Read [the release process](docs/releases.md) for PR checks, native packages,
 version changes and automatic publication after merge. Download packages from
 [GitHub Releases](https://github.com/Zain-Repo/relix/releases).
+Read [the update guide](docs/updates.md) for automatic updates and upgrading
+older versions. Relix 0.1.0 and 0.1.1 require one manual package replacement;
+workspace data and remembered credentials remain separate from the app files.
