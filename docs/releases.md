@@ -71,6 +71,8 @@ job's sidecar checksum, and writes SHA256SUMS.txt. It creates a draft at the exa
 tested commit, uploads all packages, checks their GitHub-reported sizes and
 SHA-256 digests, then publishes. An incomplete upload leaves a draft, which can
 be completed by rerunning the same commit. Published tags are never moved.
+Draft verification resolves the release ID through the GitHub CLI and reads
+the release-by-ID API; the release-by-tag API excludes unpublished drafts.
 Fix source defects with a new version and PR. Checksums verify file integrity;
 they are not publisher signatures.
 

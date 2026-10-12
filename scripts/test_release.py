@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -51,7 +52,9 @@ class ReleaseTests(unittest.TestCase):
             return ""
         if args[:2] == ("gh", "api") and "--paginate" in args:
             return "[[]]"
-        if args[:3] == ("gh", "api", "repos/example/relix/releases/tags/v0.1.0"):
+        if args[:3] == ("gh", "release", "view"):
+            return '{"databaseId": 42}'
+        if args[:3] == ("gh", "api", "repos/example/relix/releases/42"):
             assets = []
             for path in (self.root / "dist").iterdir():
                 if path.suffix != ".sha256":
@@ -66,6 +69,11 @@ class ReleaseTests(unittest.TestCase):
         (self.root / "Cargo.lock").write_text('[[package]]\nname = "relix"\nversion = "0.0.9"\n')
         with self.assertRaisesRegex(ValueError, "must match"):
             release.version()
+
+    def test_command_output_decodes_utf8_independently_of_windows_locale(self):
+        output = release.run(sys.executable, "-c",
+                             "import sys; sys.stdout.buffer.write(bytes([226, 128, 141]))")
+        self.assertEqual(output, "\u200d")
 
     def test_missing_or_empty_notes_are_rejected(self):
         notes = self.root / "releases/v0.1.0.md"
@@ -109,7 +117,8 @@ class ReleaseTests(unittest.TestCase):
     def test_all_assets_are_verified_before_publication(self):
         with patch.object(release, "run", side_effect=self.command) as command:
             release.publish()
-            writes = [call.args for call in command.call_args_list if call.args[:2] == ("gh", "release")]
+            writes = [call.args for call in command.call_args_list
+                      if call.args[:2] == ("gh", "release") and call.args[2] != "view"]
             self.assertEqual([call[2] for call in writes], ["create", "upload", "edit"])
             self.assertIn("--draft", writes[0])
             self.assertIn("--target", writes[0])
@@ -118,7 +127,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_remote_digest_failure_leaves_draft_unpublished(self):
         def command(*args):
-            if args[:3] == ("gh", "api", "repos/example/relix/releases/tags/v0.1.0"):
+            if args[:3] == ("gh", "api", "repos/example/relix/releases/42"):
                 return '{"assets": []}'
             return self.command(*args)
 
@@ -160,8 +169,22 @@ class ReleaseTests(unittest.TestCase):
 
         with patch.object(release, "run", side_effect=command) as calls:
             release.publish()
-            writes = [call.args[2] for call in calls.call_args_list if call.args[:2] == ("gh", "release")]
+            writes = [call.args[2] for call in calls.call_args_list
+                      if call.args[:2] == ("gh", "release") and call.args[2] != "view"]
             self.assertEqual(writes, ["upload", "edit"])
+
+    def test_draft_tag_endpoint_404_does_not_block_publication(self):
+        def command(*args):
+            if args[:3] == ("gh", "api", "repos/example/relix/releases/tags/v0.1.0"):
+                raise subprocess.CalledProcessError(1, args, output="Not Found (HTTP 404)")
+            return self.command(*args)
+
+        with patch.object(release, "run", side_effect=command) as calls:
+            release.publish()
+            self.assertTrue(any(call.args == ("gh", "api", "repos/example/relix/releases/42")
+                                for call in calls.call_args_list))
+            self.assertTrue(any(call.args[:3] == ("gh", "release", "edit")
+                                for call in calls.call_args_list))
 
 
 if __name__ == "__main__":

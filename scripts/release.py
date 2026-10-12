@@ -27,7 +27,7 @@ STABLE_VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
 
 def run(*args: str) -> str:
     """Fail on command errors; never include credentials in command arguments."""
-    return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+    return subprocess.check_output(args, cwd=ROOT, text=True, encoding="utf-8").strip()
 
 
 def version() -> str:
@@ -186,7 +186,10 @@ def publish() -> None:
             "--title", f"Relix {value}", "--notes-file",
             str(ROOT / "releases" / f"{tag}.md"), "--verify-tag", "--draft")
     run("gh", "release", "upload", tag, *assets, "--repo", repository, "--clobber")
-    uploaded = json.loads(run("gh", "api", f"repos/{repository}/releases/tags/{tag}"))
+    # The tag endpoint excludes drafts. Resolve the ID through the draft-aware CLI.
+    release_id = json.loads(run("gh", "release", "view", tag, "--repo", repository,
+                               "--json", "databaseId"))["databaseId"]
+    uploaded = json.loads(run("gh", "api", f"repos/{repository}/releases/{release_id}"))
     remote_assets = {item["name"]: item for item in uploaded["assets"]}
     for asset in assets:
         path = Path(asset)
