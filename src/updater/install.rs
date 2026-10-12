@@ -196,6 +196,7 @@ fn helper_name() -> &'static str {
     }
 }
 
+#[cfg(windows)]
 const CRT_FILES: &[&str] = &[
     "concrt140.dll",
     "msvcp140.dll",
@@ -303,11 +304,10 @@ fn validate_relative(path: &Path) -> Result<()> {
             "Unexpected payload directory"
         );
         let name = path.to_str().context("Invalid payload filename")?;
-        let allowed = if cfg!(windows) {
-            name == "relix.exe" || CRT_FILES.contains(&name)
-        } else {
-            name == "relix"
-        };
+        #[cfg(windows)]
+        let allowed = name == "relix.exe" || CRT_FILES.contains(&name);
+        #[cfg(not(windows))]
+        let allowed = name == "relix";
         ensure!(allowed, "Unexpected update file: {name}");
     }
     #[cfg(target_os = "macos")]
