@@ -145,6 +145,35 @@ def package(target: str) -> None:
         print(f"Packaged and smoke-checked {stem}")
 
 
+def verify_uploaded_assets(assets: list[str], uploaded: dict, repository: str, tag: str) -> None:
+    """Verify artifact identity and GitHub URLs before and after publication."""
+    if uploaded.get("tag_name") != tag:
+        raise ValueError("Uploaded release tag verification failed")
+    remote_assets = {item["name"]: item for item in uploaded["assets"]}
+    if len(remote_assets) != len(uploaded["assets"]):
+        raise ValueError("Duplicate uploaded asset names")
+    for asset in assets:
+        path = Path(asset)
+        with path.open("rb") as stream:
+            digest = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
+        remote = remote_assets.get(path.name)
+        if not remote or remote["size"] != path.stat().st_size or remote.get("digest") != digest:
+            raise ValueError(f"Uploaded asset verification failed for {path.name}")
+        url = urlsplit(remote.get("browser_download_url", ""))
+        prefix = f"/{repository}/releases/download/"
+        relative = url.path.removeprefix(prefix).split("/")
+        release_path = relative[0]
+        # GitHub assigns temporary untagged URLs to draft assets, even with an existing tag.
+        allowed_tag = release_path == tag or (
+            uploaded.get("draft") is True
+            and re.fullmatch(r"untagged-[0-9a-f]{20}", release_path) is not None
+        )
+        if (url.scheme != "https" or url.netloc != "github.com"
+                or not url.path.startswith(prefix) or len(relative) != 2
+                or relative[1] != path.name or not allowed_tag or url.query or url.fragment):
+            raise ValueError(f"Uploaded asset URL verification failed for {path.name}")
+
+
 def publish() -> None:
     validate_version()
     value = version()
@@ -166,7 +195,7 @@ def publish() -> None:
         sums.append(actual)
         assets.append(str(archive))
     combined = dist / "SHA256SUMS.txt"
-    combined.write_text("\n".join(sums) + "\n", encoding="utf-8")
+    combined.write_text("\n".join(sums) + "\n", encoding="utf-8", newline="\n")
     assets.append(str(combined))
     # API errors remain failures; they must not be treated as a missing release.
     pages = json.loads(run("gh", "api", "--paginate", "--slurp",
@@ -192,23 +221,15 @@ def publish() -> None:
     release_id = json.loads(run("gh", "release", "view", tag, "--repo", repository,
                                "--json", "databaseId"))["databaseId"]
     uploaded = json.loads(run("gh", "api", f"repos/{repository}/releases/{release_id}"))
-    remote_assets = {item["name"]: item for item in uploaded["assets"]}
-    if len(remote_assets) != len(uploaded["assets"]):
-        raise ValueError("Duplicate uploaded asset names; draft retained")
-    for asset in assets:
-        path = Path(asset)
-        with path.open("rb") as stream:
-            digest = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
-        remote = remote_assets.get(path.name)
-        if not remote or remote["size"] != path.stat().st_size or remote.get("digest") != digest:
-            raise ValueError(f"Uploaded asset verification failed for {path.name}; draft retained")
-        # Clients consume GitHub's asset digest and fixed HTTPS release origin.
-        url = urlsplit(remote.get("browser_download_url", ""))
-        expected_path = f"/{repository}/releases/download/{tag}/{path.name}"
-        if (url.scheme != "https" or url.netloc != "github.com"
-                or url.path != expected_path or url.query or url.fragment):
-            raise ValueError(f"Uploaded asset URL verification failed for {path.name}; draft retained")
+    try:
+        verify_uploaded_assets(assets, uploaded, repository, tag)
+    except ValueError as error:
+        raise ValueError(f"{error}; draft retained") from error
     run("gh", "release", "edit", tag, "--repo", repository, "--draft=false", "--latest")
+    published = json.loads(run("gh", "api", f"repos/{repository}/releases/{release_id}"))
+    if published.get("draft") is not False:
+        raise ValueError("Release remains a draft after publication")
+    verify_uploaded_assets(assets, published, repository, tag)
     print(f"Published Relix {value} at {source}")
 
 

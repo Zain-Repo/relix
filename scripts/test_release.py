@@ -18,6 +18,7 @@ spec.loader.exec_module(release)
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
+        self.published = False
         self.temporary = tempfile.TemporaryDirectory(prefix="relix-release-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -61,7 +62,10 @@ class ReleaseTests(unittest.TestCase):
                     assets.append({"name": path.name, "size": path.stat().st_size,
                                    "browser_download_url": f"https://github.com/example/relix/releases/download/v0.1.0/{path.name}",
                                    "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
-            return json.dumps({"assets": assets})
+            return json.dumps({"tag_name": "v0.1.0", "draft": not self.published, "assets": assets})
+        if args[:3] == ("gh", "release", "edit"):
+            self.published = True
+            return ""
         if args[:2] == ("gh", "release"):
             return ""
         raise AssertionError(f"Unexpected command: {args}")
@@ -125,11 +129,12 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("--target", writes[0])
             self.assertIn("tested-commit", writes[0])
             self.assertIn("--draft=false", writes[-1])
+            self.assertNotIn(b"\r\n", (self.root / "dist/SHA256SUMS.txt").read_bytes())
 
     def test_remote_digest_failure_leaves_draft_unpublished(self):
         def command(*args):
             if args[:3] == ("gh", "api", "repos/example/relix/releases/42"):
-                return '{"assets": []}'
+                return '{"tag_name": "v0.1.0", "draft": true, "assets": []}'
             return self.command(*args)
 
         with patch.object(release, "run", side_effect=command) as calls:
@@ -164,6 +169,37 @@ class ReleaseTests(unittest.TestCase):
                     release.publish()
                 self.assertFalse(any(call.args[:3] == ("gh", "release", "edit")
                                      for call in calls.call_args_list))
+
+    def test_temporary_draft_urls_are_verified_then_versioned_urls_are_required(self):
+        def command(*args):
+            result = self.command(*args)
+            if args[:3] == ("gh", "api", "repos/example/relix/releases/42") and not self.published:
+                payload = json.loads(result)
+                for asset in payload["assets"]:
+                    asset["browser_download_url"] = asset["browser_download_url"].replace(
+                        "/download/v0.1.0/", "/download/untagged-69987e043e2254bb6bb6/")
+                return json.dumps(payload)
+            return result
+
+        with patch.object(release, "run", side_effect=command) as calls:
+            release.publish()
+            reads = [call for call in calls.call_args_list
+                     if call.args == ("gh", "api", "repos/example/relix/releases/42")]
+            self.assertEqual(len(reads), 2)
+
+    def test_published_temporary_urls_are_rejected(self):
+        def command(*args):
+            result = self.command(*args)
+            if args[:3] == ("gh", "api", "repos/example/relix/releases/42") and self.published:
+                payload = json.loads(result)
+                payload["assets"][0]["browser_download_url"] = payload["assets"][0]["browser_download_url"].replace(
+                    "/download/v0.1.0/", "/download/untagged-69987e043e2254bb6bb6/")
+                return json.dumps(payload)
+            return result
+
+        with patch.object(release, "run", side_effect=command):
+            with self.assertRaisesRegex(ValueError, "URL verification failed"):
+                release.publish()
 
     def test_missing_or_wrong_github_digest_leaves_draft_unpublished(self):
         for digest in [None, "sha256:" + "0" * 64]:
